@@ -164,6 +164,7 @@ class MultiClientImpl {
         new MagicRemoteBuffer(endpoint_.peer_info.ctx));
 
     local_mem_ = static_cast<char*>(aligned_alloc(4096, kLocalMemSize));
+    std::memset(local_mem_, 0, kLocalMemSize);
     if (!local_mem_) {
       std::cerr << "Failed to allocate local memory" << std::endl;
       std::exit(1);
@@ -359,6 +360,13 @@ class MultiClientRingServerImpl {
     uint32_t cid = next_cid_.load(std::memory_order_relaxed);
     Endpoint endpoint = AcceptEndpointWithRequest(
         *server_, req.first, req.second, info_, attr_, cid);
+
+    std::cerr << "[ZRCP_SERVER] accepted cid=" << cid
+          << " ep=" << endpoint.ep
+          << " recv_cq=" << endpoint.ep->qp->recv_cq
+          << " send_cq=" << endpoint.ep->qp->send_cq
+          << std::endl;
+
     if (cid >= max_clients_) {
       std::cerr << "[Server] rejected client id " << cid << std::endl;
       rdma_disconnect(endpoint.ep->id);
@@ -394,15 +402,38 @@ class MultiClientRingServerImpl {
     int ret = ibv_poll_cq(recv_cq_, 16, wcs);
     for (int i = 0; i < ret; ++i) {
       if (wcs[i].opcode != IBV_WC_RECV_RDMA_WITH_IMM) continue;
+
+      if (wcs[i].status != IBV_WC_SUCCESS) {
+        std::cerr << "[ZRCP_SERVER] bad WC status=" << wcs[i].status
+                  << " wr_id=" << wcs[i].wr_id
+                  << std::endl;
+        continue;
+      }
+
       const uint32_t length = wcs[i].byte_len;
       const uint32_t offset = wcs[i].imm_data;
       char* payload = local_buffer_->GetReadPtr(offset);
       const uint32_t cid = static_cast<uint32_t>(wcs[i].wr_id);
+      std::cerr << "[ZRCP_SERVER] wc opcode=" << wcs[i].opcode
+          << " cid=" << cid
+          << " byte_len=" << wcs[i].byte_len
+          << " imm=" << wcs[i].imm_data
+          << " status=" << wcs[i].status
+          << std::endl;
       if (cid >= max_clients_) continue;
       if (cid >= connected_.load(std::memory_order_acquire)) continue;
       VerbsEP* ep = eps_[cid];
       if (!ep) continue;
+      std::cerr << "[ZRCP_SERVER] before handler cid=" << cid
+          << " len=" << length
+          << " offset=" << offset
+          << std::endl;
+
       handler(cid, std::string(payload, payload + length));
+
+      std::cerr << "[ZRCP_SERVER] after handler cid=" << cid
+          << " len=" << length
+          << std::endl;
       ep->post_empty_recvs(1);
 
       const uint64_t new_head = local_buffer_->FreeOrdered(payload, length);
@@ -410,6 +441,9 @@ class MultiClientRingServerImpl {
         lhead_ = new_head;
         if (head_ptr_) *head_ptr_ = lhead_;
       }
+      std::cerr << "[ZRCP_SERVER] reposted recv cid=" << cid
+          << " new_head=" << lhead_
+          << std::endl;
     }
   }
 
@@ -423,6 +457,7 @@ class MultiClientRingServerImpl {
 
     if (eps_[0]) {
       recv_cq_ = eps_[0]->qp->recv_cq;
+      std::cerr << "[ZRCP_SERVER] polling recv_cq_=" << recv_cq_ << std::endl;
       lhead_ = local_buffer_->Free(0);
       head_ptr_ = reinterpret_cast<volatile uint64_t*>(mailbox_mem_);
       faa_ptr_ =

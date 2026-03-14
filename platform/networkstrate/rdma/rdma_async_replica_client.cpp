@@ -18,6 +18,7 @@
  */
 
 #include "platform/networkstrate/rdma/rdma_async_replica_client.h"
+#include <iostream>
 
 namespace resdb {
 
@@ -45,8 +46,22 @@ int RdmaAsyncReplicaClient::SendMessage(const std::string& data,
     client_->SendAsync(data);  // Asynchronous: User has to use
                                // client_->Progress() to manually Poll
   } else {
+    std::cerr << "[RDMA_CLIENT] Send enter ip=" << ip_
+           << " port=" << port_
+           << " bytes=" << data.size()
+           << " outstanding_before=" << client_->Outstanding();
     client_->Send(data);  // Synchronous: blocks until send completes
+    std::cerr << "[RDMA_CLIENT] Send exit ip=" << ip_
+           << " port=" << port_
+           << " outstanding_after=" << client_->Outstanding();
   }
+  // uint32_t outstanding = client_->Outstanding();
+  // if (outstanding >= max_outstanding_) {
+  //   LOG(ERROR) << "[RDMA_CLIENT] outstanding saturated ip=" << ip_
+  //             << " port=" << port_
+  //             << " outstanding=" << outstanding
+  //             << " max_outstanding=" << max_outstanding_;
+  // }
   return 0;
 }
 

@@ -47,7 +47,11 @@ RdmaAsyncReplicaClient* RdmaReplicaCommunicator::GetOrCreateClient(
                << " rdma_port=" << rdma_port
                << " offset=" << rdma_port_offset_;
     rdma_clients_[key] = std::make_unique<RdmaAsyncReplicaClient>(
-        ip, rdma_port, 8, 65536, 65536, use_basic_ring_);
+        ip, rdma_port, 64, 65536, 65536, use_basic_ring_);          // 8 changed to
+
+    LOG(ERROR) << "[RDMA] client created key=(" << ip << "," << rdma_port
+               << ") ptr=" << rdma_clients_[key].get()
+               << " basic_ring=" << use_basic_ring_;
   }
   return rdma_clients_[key].get();
 }
@@ -78,7 +82,19 @@ int RdmaReplicaCommunicator::SendToReplica(
              << " rdma_port=" << rdma_port
              << " payload_bytes=" << data.size();
   auto* client = GetOrCreateClient(replica_info.ip(), replica_info.port());
+
+  LOG(ERROR) << "[RDMA] calling client->SendMessage target id="
+           << replica_info.id()
+           << " client_ptr=" << client
+           << " bytes=" << data.size();
+
   int ret = client->SendMessage(data, false);
+
+  LOG(ERROR) << "[RDMA] client->SendMessage returned target id="
+           << replica_info.id()
+           << " client_ptr=" << client
+           << " ret=" << ret;
+
   if (ret != 0) {
     LOG(ERROR) << "[RDMA] send failed target id=" << replica_info.id()
                << " ip=" << replica_info.ip()
@@ -97,6 +113,12 @@ void RdmaReplicaCommunicator::EstablishControlPlaneConnections(int64_t self_id) 
   for (const auto& replica : replicas_) {
     if (!replica.ip().empty() && replica.port()) {
       GetOrCreateClient(replica.ip(), replica.port());
+
+      LOG(ERROR) << "[RDMA] establish control-plane self_id=" << self_id
+           << " target_id=" << replica.id()
+           << " ip=" << replica.ip()
+           << " port=" << replica.port();
+
     }
   }
 }
